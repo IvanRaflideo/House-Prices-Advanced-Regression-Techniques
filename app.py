@@ -18,6 +18,22 @@ DATA_PATH = "train.csv"
 st.set_page_config(page_title="Prediksi Harga Rumah (RF)", layout="centered")
 
 # ======================
+# DATA SCHEMA (FEATURE COLUMNS)
+# ======================
+@st.cache_data
+def get_feature_columns():
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(
+            "train.csv tidak ditemukan. Upload file train.csv dari Kaggle ke folder yang sama dengan app.py."
+        )
+    df = pd.read_csv(DATA_PATH)
+    if "SalePrice" not in df.columns:
+        raise ValueError("Kolom target 'SalePrice' tidak ditemukan di train.csv.")
+    return df.drop(columns=["SalePrice"]).columns.tolist()
+
+FEATURE_COLS = get_feature_columns()
+
+# ======================
 # LOAD OR TRAIN MODEL
 # ======================
 @st.cache_resource
@@ -27,16 +43,7 @@ def load_or_train_model():
         return joblib.load(MODEL_PATH)
 
     # Train model if not exists
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(
-            "train.csv tidak ditemukan. Upload file train.csv dari Kaggle House Prices ke folder yang sama dengan app.py."
-        )
-
     df = pd.read_csv(DATA_PATH)
-
-    if "SalePrice" not in df.columns:
-        raise ValueError("Kolom target 'SalePrice' tidak ditemukan di train.csv.")
-
     y = df["SalePrice"]
     X = df.drop(columns=["SalePrice"])
 
@@ -88,10 +95,11 @@ with st.expander("📌 Info Model", expanded=False):
     st.write("- Algoritma: Random Forest Regression")
     st.write("- Target: `SalePrice`")
     st.write("- Model otomatis dilatih pada first run jika file model belum ada.")
+    st.write(f"- Total fitur training: **{len(FEATURE_COLS)}** kolom (input kamu akan diisi NaN untuk kolom lain).")
 
 model = load_or_train_model()
 
-st.subheader("Masukkan Data Rumah")
+st.subheader("Masukkan Data Rumah (beberapa fitur utama)")
 
 col1, col2 = st.columns(2)
 
@@ -107,9 +115,10 @@ with col2:
     bedroom_abvgr = st.number_input("BedroomAbvGr", min_value=0, max_value=10, value=3)
     neighborhood = st.text_input("Neighborhood (contoh: NAmes, CollgCr)", value="NAmes")
 
-st.caption("Catatan: Jika Neighborhood tidak sesuai kategori dataset, model tetap aman karena OneHotEncoder pakai handle_unknown='ignore'.")
+st.caption("Kolom lain yang tidak kamu isi akan otomatis dianggap kosong (NaN) dan di-handle oleh imputer di pipeline.")
 
-input_df = pd.DataFrame([{
+# Input minimal dari user
+input_min = pd.DataFrame([{
     "OverallQual": overall_qual,
     "GrLivArea": gr_liv_area,
     "YearBuilt": year_built,
@@ -120,8 +129,11 @@ input_df = pd.DataFrame([{
     "Neighborhood": neighborhood,
 }])
 
-st.write("### Preview Input")
-st.dataframe(input_df, use_container_width=True)
+# 🔥 INI KUNCI FIX: samakan kolom input dengan kolom training
+input_df = input_min.reindex(columns=FEATURE_COLS)
+
+st.write("### Preview Input (subset yang kamu isi)")
+st.dataframe(input_min, use_container_width=True)
 
 if st.button("Prediksi Harga"):
     pred = model.predict(input_df)[0]
