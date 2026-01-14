@@ -33,5 +33,6 @@ model = load_model()
 # ======================
 # UI
 # ======================
-st.title("🏠 Prediksi Harga
+st.title("🏠 Prediksi Harga rumah")
+
 
