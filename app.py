@@ -18,31 +18,25 @@ DATA_PATH = "train.csv"
 st.set_page_config(page_title="Prediksi Harga Rumah (RF)", layout="centered")
 
 # ======================
-# DATA SCHEMA (FEATURE COLUMNS)
+# LOAD FEATURE COLUMNS
 # ======================
 @st.cache_data
 def get_feature_columns():
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(
-            "train.csv tidak ditemukan. Upload file train.csv dari Kaggle ke folder yang sama dengan app.py."
-        )
     df = pd.read_csv(DATA_PATH)
-    if "SalePrice" not in df.columns:
-        raise ValueError("Kolom target 'SalePrice' tidak ditemukan di train.csv.")
     return df.drop(columns=["SalePrice"]).columns.tolist()
 
 FEATURE_COLS = get_feature_columns()
 
 # ======================
-# LOAD OR TRAIN MODEL
+# LOAD / TRAIN MODEL
 # ======================
 @st.cache_resource
 def load_or_train_model():
-    # Load model if exists
+    os.makedirs("model", exist_ok=True)
+
     if os.path.exists(MODEL_PATH):
         return joblib.load(MODEL_PATH)
 
-    # Train model if not exists
     df = pd.read_csv(DATA_PATH)
     y = df["SalePrice"]
     X = df.drop(columns=["SalePrice"])
@@ -50,91 +44,75 @@ def load_or_train_model():
     num_cols = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
     cat_cols = X.select_dtypes(include=["object"]).columns.tolist()
 
-    numeric_transformer = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="median")),
+    num_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median"))
     ])
 
-    categorical_transformer = Pipeline(steps=[
+    cat_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ("onehot", OneHotEncoder(handle_unknown="ignore"))
     ])
 
-    preprocess = ColumnTransformer(
-        transformers=[
-            ("num", numeric_transformer, num_cols),
-            ("cat", categorical_transformer, cat_cols),
-        ],
-        remainder="drop"
-    )
-
-    rf_model = RandomForestRegressor(
-        n_estimators=350,
-        random_state=42,
-        n_jobs=-1
-    )
-
-    pipeline = Pipeline(steps=[
-        ("preprocess", preprocess),
-        ("model", rf_model),
+    preprocess = ColumnTransformer([
+        ("num", num_pipe, num_cols),
+        ("cat", cat_pipe, cat_cols)
     ])
 
-    pipeline.fit(X, y)
+    model = Pipeline([
+        ("prep", preprocess),
+        ("rf", RandomForestRegressor(
+            n_estimators=350,
+            random_state=42,
+            n_jobs=-1
+        ))
+    ])
 
-    os.makedirs("model", exist_ok=True)
-    joblib.dump(pipeline, MODEL_PATH)
+    model.fit(X, y)
+    joblib.dump(model, MODEL_PATH)
 
-    return pipeline
-
-# ======================
-# APP UI
-# ======================
-st.title("🏠 Prediksi Harga Rumah - Random Forest Regression")
-st.write("Prototype deployment ML menggunakan dataset Kaggle **House Prices – Advanced Regression Techniques**.")
-
-with st.expander("📌 Info Model", expanded=False):
-    st.write("- Algoritma: Random Forest Regression")
-    st.write("- Target: `SalePrice`")
-    st.write("- Model otomatis dilatih pada first run jika file model belum ada.")
-    st.write(f"- Total fitur training: **{len(FEATURE_COLS)}** kolom (input kamu akan diisi NaN untuk kolom lain).")
+    return model
 
 model = load_or_train_model()
 
-st.subheader("Masukkan Data Rumah (beberapa fitur utama)")
+# ======================
+# UI
+# ======================
+st.title("🏠 Prediksi Harga Rumah - Random Forest")
+st.caption("House Prices Kaggle Dataset")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    overall_qual = st.slider("OverallQual (1-10)", 1, 10, 5)
-    gr_liv_area = st.number_input("GrLivArea (sqft)", min_value=200, max_value=6000, value=1500)
-    year_built = st.number_input("YearBuilt", min_value=1800, max_value=2025, value=2000)
-    garage_cars = st.number_input("GarageCars", min_value=0, max_value=6, value=2)
+    OverallQual = st.slider("OverallQual", 1, 10, 5)
+    GrLivArea = st.number_input("GrLivArea", 200, 6000, 1500)
+    YearBuilt = st.number_input("YearBuilt", 1800, 2025, 2000)
+    GarageCars = st.number_input("GarageCars", 0, 6, 2)
 
 with col2:
-    total_bsmt_sf = st.number_input("TotalBsmtSF (sqft)", min_value=0, max_value=6000, value=800)
-    full_bath = st.number_input("FullBath", min_value=0, max_value=5, value=2)
-    bedroom_abvgr = st.number_input("BedroomAbvGr", min_value=0, max_value=10, value=3)
-    neighborhood = st.text_input("Neighborhood (contoh: NAmes, CollgCr)", value="NAmes")
+    TotalBsmtSF = st.number_input("TotalBsmtSF", 0, 6000, 800)
+    FullBath = st.number_input("FullBath", 0, 5, 2)
+    BedroomAbvGr = st.number_input("BedroomAbvGr", 0, 10, 3)
+    Neighborhood = st.text_input("Neighborhood", "NAmes")
 
-st.caption("Kolom lain yang tidak kamu isi akan otomatis dianggap kosong (NaN) dan di-handle oleh imputer di pipeline.")
-
-# Input minimal dari user
-input_min = pd.DataFrame([{
-    "OverallQual": overall_qual,
-    "GrLivArea": gr_liv_area,
-    "YearBuilt": year_built,
-    "GarageCars": garage_cars,
-    "TotalBsmtSF": total_bsmt_sf,
-    "FullBath": full_bath,
-    "BedroomAbvGr": bedroom_abvgr,
-    "Neighborhood": neighborhood,
+# ======================
+# CREATE FULL FEATURE ROW
+# ======================
+user_input = pd.DataFrame([{
+    "OverallQual": OverallQual,
+    "GrLivArea": GrLivArea,
+    "YearBuilt": YearBuilt,
+    "GarageCars": GarageCars,
+    "TotalBsmtSF": TotalBsmtSF,
+    "FullBath": FullBath,
+    "BedroomAbvGr": BedroomAbvGr,
+    "Neighborhood": Neighborhood
 }])
 
-# 🔥 INI KUNCI FIX: samakan kolom input dengan kolom training
-input_df = input_min.reindex(columns=FEATURE_COLS)
+# align kolom training
+input_df = user_input.reindex(columns=FEATURE_COLS)
 
-st.write("### Preview Input (subset yang kamu isi)")
-st.dataframe(input_min, use_container_width=True)
+st.dataframe(user_input, use_container_width=True)
 
 if st.button("Prediksi Harga"):
-    pred = model.predict(input_df)[0]
-    st.success(f"Perkiraan Harga Rumah: **${pred:,.0f}**")
+    price = model.predict(input_df)[0]
+    st.success(f"💰 Estimasi Harga Rumah: **${price:,.0f}**")
